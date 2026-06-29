@@ -1,0 +1,157 @@
+# Penpot — self-hosted, production compose for Coolify (Traefik) behind Cloudflare
+# Target: https://penpot.increstive.co.th  |  Region: DigitalOcean sgp1
+#
+# Deploy as a "Docker Compose" resource in Coolify. Assign the domain
+#   https://penpot.increstive.co.th:8080
+# to the `penpot-frontend` service in the Coolify UI (the :8080 is the CONTAINER
+# port; Coolify/Traefik still serves it publicly on 443). Coolify injects the
+# Traefik routing labels automatically — do not add your own.
+#
+# Secrets (PENPOT_SECRET_KEY, POSTGRES_PASSWORD, POSTMARK_SERVER_TOKEN,
+# AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are referenced as ${VARS} and must be
+# set in Coolify's Environment Variables UI. See .env.example for the values.
+
+x-flags: &penpot-flags
+  # verification ON (no disable-email-verification), secure cookies ON
+  # (no disable-secure-session-cookies), registration ON (no disable-registration).
+  PENPOT_FLAGS: enable-smtp enable-email-whitelist disable-onboarding enable-mcp enable-access-tokens enable-prepl-server
+
+x-uri: &penpot-public-uri
+  PENPOT_PUBLIC_URI: https://penpot.increstive.co.th
+
+x-body-size: &penpot-http-body-size
+  # 350MB app limit. NOTE: Cloudflare Free caps the request body at 100MB, so the
+  # real upload ceiling is ~100MB unless you raise it on the Cloudflare side.
+  PENPOT_HTTP_SERVER_MAX_BODY_SIZE: 367001600
+  PENPOT_HTTP_SERVER_MAX_MULTIPART_BODY_SIZE: 367001600
+
+x-secret-key: &penpot-secret-key
+  # Master key for session / invitation / email-verification token derivation. MUST be
+  # stable across redeploys or every active session and pending verification link breaks.
+  PENPOT_SECRET_KEY: ${PENPOT_SECRET_KEY}
+
+networks:
+  penpot:
+
+volumes:
+  penpot_postgres_v15:
+  penpot_assets:
+
+services:
+  penpot-frontend:
+    image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
+    restart: always
+    expose:
+      - "8080"
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      - penpot-backend
+      - penpot-exporter
+      - penpot-mcp
+    networks:
+      - penpot
+    environment:
+      <<: [*penpot-flags, *penpot-http-body-size, *penpot-public-uri]
+
+  penpot-backend:
+    image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
+    restart: always
+    volumes:
+      - penpot_assets:/opt/data/assets
+    depends_on:
+      penpot-postgres:
+        condition: service_healthy
+      penpot-valkey:
+        condition: service_healthy
+    networks:
+      - penpot
+    environment:
+      <<: [*penpot-flags, *penpot-public-uri, *penpot-http-body-size, *penpot-secret-key]
+
+      # --- Database (in-compose Postgres) ---
+      PENPOT_DATABASE_URI: postgresql://penpot-postgres/penpot
+      PENPOT_DATABASE_USERNAME: penpot
+      PENPOT_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # --- Valkey ---
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+      # --- Object storage: DigitalOcean Spaces (S3-compatible), sgp1 ---
+      PENPOT_OBJECTS_STORAGE_BACKEND: s3
+      PENPOT_OBJECTS_STORAGE_S3_REGION: sgp1
+      PENPOT_OBJECTS_STORAGE_S3_BUCKET: inc-penpot-contents
+      PENPOT_OBJECTS_STORAGE_S3_ENDPOINT: https://sgp1.digitaloceanspaces.com
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+
+      # --- Registration scoped to a single domain (exact match, no subdomains) ---
+      PENPOT_REGISTRATION_DOMAIN_WHITELIST: increstive.co.th
+
+      # --- Email via Postmark SMTP (Server Token used as BOTH username and password) ---
+      PENPOT_SMTP_DEFAULT_FROM: "Penpot <noreply@increstive.co.th>"
+      PENPOT_SMTP_DEFAULT_REPLY_TO: "Penpot <noreply@increstive.co.th>"
+      PENPOT_SMTP_HOST: smtp.postmarkapp.com
+      PENPOT_SMTP_PORT: "587"
+      PENPOT_SMTP_USERNAME: ${POSTMARK_SERVER_TOKEN}
+      PENPOT_SMTP_PASSWORD: ${POSTMARK_SERVER_TOKEN}
+      PENPOT_SMTP_TLS: "true"
+      PENPOT_SMTP_SSL: "false"
+
+      # --- Telemetry OFF (not opted in). Set "true" to anonymously help Penpot. ---
+      PENPOT_TELEMETRY_ENABLED: "false"
+      PENPOT_TELEMETRY_REFERER: compose
+
+  penpot-mcp:
+    image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
+    restart: always
+    networks:
+      - penpot
+
+  penpot-exporter:
+    image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
+    restart: always
+    depends_on:
+      penpot-valkey:
+        condition: service_healthy
+    networks:
+      - penpot
+    environment:
+      <<: [*penpot-secret-key]
+      # Internal docker-network URI to reach the frontend. Don't change.
+      PENPOT_PUBLIC_URI: http://penpot-frontend:8080
+      PENPOT_REDIS_URI: redis://penpot-valkey/0
+
+  penpot-postgres:
+    image: "postgres:15"
+    restart: always
+    stop_signal: SIGINT
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U penpot"]
+      interval: 2s
+      timeout: 10s
+      retries: 5
+      start_period: 2s
+    volumes:
+      - penpot_postgres_v15:/var/lib/postgresql/data
+    networks:
+      - penpot
+    environment:
+      - POSTGRES_INITDB_ARGS=--data-checksums
+      - POSTGRES_DB=penpot
+      - POSTGRES_USER=penpot
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+
+  penpot-valkey:
+    image: valkey/valkey:8.1
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli ping | grep PONG"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    networks:
+      - penpot
+    environment:
+      - VALKEY_EXTRA_FLAGS=--maxmemory 128mb --maxmemory-policy volatile-lfu
