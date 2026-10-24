@@ -1,6 +1,6 @@
 # Penpot Deployment Runbook — penpot.increstive.co.th
 
-Self-hosted Penpot **2.16** on a DigitalOcean droplet (sgp1) via **Coolify** (Traefik proxy), behind **Cloudflare**, with **Postmark** SMTP and **DigitalOcean Spaces** (S3) object storage.
+Self-hosted Penpot **2.18** on a DigitalOcean droplet (sgp1) via **Coolify** (Traefik proxy), behind **Cloudflare**, with **Postmark** SMTP and **DigitalOcean Spaces** (S3) object storage.
 
 Files: [`docker-compose.yaml`](./docker-compose.yaml) · [`.env.example`](./.env.example)
 
@@ -81,7 +81,7 @@ Work through these in order — each catches a specific, common failure:
 ## Decisions record (from the grilling session)
 
 - **TLS**: terminated by Coolify/Traefik (Let's Encrypt), Cloudflare Full-strict in front. No proxy/TLS container inside the compose.
-- **Version**: pinned to `2.16` minor (patch-on-redeploy OK; no surprise majors).
+- **Version**: pinned to `2.18` minor (patch-on-redeploy OK; no surprise majors).
 - **Registration**: Option A — open self-registration, domain-scoped (not invite-only).
 - **Email**: verification required; Postmark domain-verified; single Server Token as user+pass.
 - **Storage**: DO Spaces `inc-penpot-contents` @ sgp1, private + presigned URLs + CORS.

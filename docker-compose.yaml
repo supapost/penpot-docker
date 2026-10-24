@@ -39,7 +39,7 @@ volumes:
 
 services:
   penpot-frontend:
-    image: "penpotapp/frontend:${PENPOT_VERSION:-2.16}"
+    image: "penpotapp/frontend:${PENPOT_VERSION:-2.18}"
     restart: always
     expose:
       - "8080"
@@ -55,7 +55,7 @@ services:
       <<: [*penpot-flags, *penpot-http-body-size, *penpot-public-uri]
 
   penpot-backend:
-    image: "penpotapp/backend:${PENPOT_VERSION:-2.16}"
+    image: "penpotapp/backend:${PENPOT_VERSION:-2.18}"
     restart: always
     volumes:
       - penpot_assets:/opt/data/assets
@@ -103,13 +103,13 @@ services:
       PENPOT_TELEMETRY_REFERER: compose
 
   penpot-mcp:
-    image: "penpotapp/mcp:${PENPOT_VERSION:-2.16}"
+    image: "penpotapp/mcp:${PENPOT_VERSION:-2.18}"
     restart: always
     networks:
       - penpot
 
   penpot-exporter:
-    image: "penpotapp/exporter:${PENPOT_VERSION:-2.16}"
+    image: "penpotapp/exporter:${PENPOT_VERSION:-2.18}"
     restart: always
     depends_on:
       penpot-valkey:
